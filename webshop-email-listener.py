@@ -18,7 +18,7 @@ default_args = {
 }
 
 CREDENTIALS_PATH = "/opt/airflow/dags/credentials.json"
-EMAIL_ACCOUNT = "webshop-support-agent-6981@lowtouch.ai"
+EMAIL_ACCOUNT = "airflow9023@gmail.com"
 
 def authenticate_gmail():
     """Authenticate Gmail API"""
