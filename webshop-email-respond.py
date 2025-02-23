@@ -15,7 +15,7 @@ default_args = {
     "retry_delay": timedelta(minutes=5),
 }
 
-CREDENTIALS_PATH = "/opt/airflow/dags/credentials.json"
+CREDENTIALS_PATH = "/appz/home/airflow/dags/credentials.json"
 
 def authenticate_gmail():
     """Authenticate Gmail API"""
