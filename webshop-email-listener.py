@@ -20,11 +20,14 @@ default_args = {
 }
 
 # Load credentials and email from Airflow Variables
-raw_credentials = Variable.get("GMAIL_CREDENTIALS")  # Retrieve raw JSON string
 try:
-    GMAIL_CREDENTIALS = json.loads(raw_credentials)  # Manually parse JSON
-except json.JSONDecodeError as e:
-    raise ValueError(f"❌ JSON Parsing Error in GMAIL_CREDENTIALS: {e}")
+    raw_credentials = Variable.get("GMAIL_CREDENTIALS")  # Get as raw string
+    if not raw_credentials:
+        raise ValueError("GMAIL_CREDENTIALS is empty in Airflow Variables!")
+
+    GMAIL_CREDENTIALS = json.loads(raw_credentials)  # ✅ Manually parse JSON
+except Exception as e:
+    raise ValueError(f"❌ Error retrieving GMAIL_CREDENTIALS: {e}")
 
 EMAIL_ID = Variable.get("EMAIL_ID")  # ✅ Updated variable name
 
@@ -50,9 +53,8 @@ def get_last_checked_timestamp():
     """Retrieve last processed timestamp, or initialize it."""
     if os.path.exists(LAST_CHECK_TIMESTAMP_FILE):
         with open(LAST_CHECK_TIMESTAMP_FILE, "r") as f:
-            return json.load(f).get("last_checked", int(time.time()))  # Default to current time
+            return json.load(f).get("last_checked", int(time.time()))
 
-    # Initialize with the current timestamp
     current_timestamp = int(time.time())
     update_last_checked_timestamp(current_timestamp)
     return current_timestamp
@@ -78,12 +80,10 @@ def fetch_unread_emails(**kwargs):
     for msg in messages:
         msg_data = service.users().messages().get(userId="me", id=msg["id"]).execute()
         
-        # Extract email details
         headers = {header["name"]: header["value"] for header in msg_data["payload"]["headers"]}
         sender = headers.get("From", "").lower()
-        timestamp = int(msg_data["internalDate"])  # Timestamp in milliseconds
+        timestamp = int(msg_data["internalDate"])
 
-        # Skip no-reply emails and previously processed emails
         if "no-reply" in sender or timestamp <= last_checked_timestamp:
             continue
 
@@ -93,13 +93,11 @@ def fetch_unread_emails(**kwargs):
         if timestamp > max_timestamp:
             max_timestamp = timestamp
 
-    # Update last checked timestamp only if new emails were found
     if unread_emails:
         update_last_checked_timestamp(max_timestamp)
 
     kwargs['ti'].xcom_push(key="unread_emails", value=unread_emails)
 
-# Define DAG
 with DAG("webshop-email-listener",
          default_args=default_args,
          schedule_interval=timedelta(minutes=1),
@@ -112,7 +110,6 @@ with DAG("webshop-email-listener",
     )
 
     def trigger_response_tasks(**kwargs):
-        """Trigger 'webshop-email-respond' for each unread email."""
         ti = kwargs['ti']
         unread_emails = ti.xcom_pull(task_ids="fetch_unread_emails", key="unread_emails")
 
