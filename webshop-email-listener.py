@@ -14,16 +14,21 @@ from googleapiclient.discovery import build
 default_args = {
     "owner": "airflow",
     "depends_on_past": False,
-    "start_date": datetime(2024, 2, 24),  # ✅ Set to today's date
+    "start_date": datetime(2024, 2, 24),  # ✅ Hardcoded for stability
     "retries": 1,
     "retry_delay": timedelta(minutes=5),
 }
 
 # Load credentials and email from Airflow Variables
-GMAIL_CREDENTIALS = Variable.get("GMAIL_CREDENTIALS", deserialize_json=True)
-EMAIL_ID = Variable.get("EMAIL_ID")  # ✅ Renamed variable
+raw_credentials = Variable.get("GMAIL_CREDENTIALS")  # Retrieve raw JSON string
+try:
+    GMAIL_CREDENTIALS = json.loads(raw_credentials)  # Manually parse JSON
+except json.JSONDecodeError as e:
+    raise ValueError(f"❌ JSON Parsing Error in GMAIL_CREDENTIALS: {e}")
 
-# File to store last processed timestamp (Updated Path)
+EMAIL_ID = Variable.get("EMAIL_ID")  # ✅ Updated variable name
+
+# Updated timestamp storage path
 LAST_CHECK_TIMESTAMP_FILE = "/appz/cache/last_checked_timestamp.json"
 
 def authenticate_gmail():
@@ -42,7 +47,7 @@ def authenticate_gmail():
     return service
 
 def get_last_checked_timestamp():
-    """Retrieve last processed timestamp, or set current timestamp if missing."""
+    """Retrieve last processed timestamp, or initialize it."""
     if os.path.exists(LAST_CHECK_TIMESTAMP_FILE):
         with open(LAST_CHECK_TIMESTAMP_FILE, "r") as f:
             return json.load(f).get("last_checked", int(time.time()))  # Default to current time
