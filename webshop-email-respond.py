@@ -12,26 +12,26 @@ from googleapiclient.discovery import build
 default_args = {
     "owner": "airflow",
     "depends_on_past": False,
-    "start_date": datetime(2024, 2, 24),  # ✅ Hardcoded for stability
+    "start_date": datetime(2024, 2, 24),
     "retries": 1,
     "retry_delay": timedelta(minutes=5),
 }
 
-# Load credentials and email from Airflow Variables
-raw_credentials = Variable.get("GMAIL_CREDENTIALS")  # Retrieve raw JSON string
 try:
-    GMAIL_CREDENTIALS = json.loads(raw_credentials)  # Manually parse JSON
-except json.JSONDecodeError as e:
-    raise ValueError(f"❌ JSON Parsing Error in GMAIL_CREDENTIALS: {e}")
+    raw_credentials = Variable.get("GMAIL_CREDENTIALS")
+    if not raw_credentials:
+        raise ValueError("GMAIL_CREDENTIALS is empty!")
 
-EMAIL_ID = Variable.get("EMAIL_ID")  # ✅ Updated variable name
+    GMAIL_CREDENTIALS = json.loads(raw_credentials)
+except Exception as e:
+    raise ValueError(f"❌ Error retrieving GMAIL_CREDENTIALS: {e}")
+
+EMAIL_ID = Variable.get("EMAIL_ID")
 
 def authenticate_gmail():
-    """Authenticate Gmail API using stored credentials."""
     creds = Credentials.from_authorized_user_info(GMAIL_CREDENTIALS)
     service = build("gmail", "v1", credentials=creds)
 
-    # Verify authenticated email
     profile = service.users().getProfile(userId="me").execute()
     logged_in_email = profile.get("emailAddress", "")
 
@@ -42,35 +42,20 @@ def authenticate_gmail():
     return service
 
 def send_response(**kwargs):
-    """Send auto-response without modifying email read status."""
-    email_data = kwargs['dag_run'].conf  # Get email details from trigger
+    email_data = kwargs['dag_run'].conf
     service = authenticate_gmail()
     
     recipient = email_data["headers"].get("From", "")
 
-    # Construct email response
-    message_body = f"Hi,\n\nThanks for reaching out. Our support team will get back to you soon.\n\nBest Regards,\nWebshop Support"
+    message_body = f"Hi,\n\nThanks for your inquiry. We'll get back to you soon.\n\nBest,\nWebshop Support"
     email_msg = f"From: me\nTo: {recipient}\nSubject: Re: {email_data['headers'].get('Subject', 'No Subject')}\n\n{message_body}"
     encoded_message = base64.urlsafe_b64encode(email_msg.encode("utf-8")).decode("utf-8")
 
-    # Send email response
-    service.users().messages().send(
-        userId="me",
-        body={"raw": encoded_message}
-    ).execute()
+    service.users().messages().send(userId="me", body={"raw": encoded_message}).execute()
 
-    print(f"✅ Response sent to {recipient}")
-
-# Define DAG
 with DAG("webshop-email-respond",
          default_args=default_args,
-         schedule_interval=None,  # This DAG is triggered dynamically
+         schedule_interval=None,
          catchup=False) as dag:
 
-    send_response_task = PythonOperator(
-        task_id="send-response",
-        python_callable=send_response,
-        provide_context=True
-    )
-
-    send_response_task
+    send_response_task = PythonOperator(task_id="send-response", python_callable=send_response, provide_context=True)
