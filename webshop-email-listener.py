@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import os
 import json
 import time
+import base64
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
@@ -13,46 +14,46 @@ from googleapiclient.discovery import build
 default_args = {
     "owner": "airflow",
     "depends_on_past": False,
-    "start_date": datetime(2024, 2, 18),
+    "start_date": datetime(2024, 2, 24),  # ✅ Set to today's date
     "retries": 1,
     "retry_delay": timedelta(minutes=5),
 }
 
-# Configuration variables
-CREDENTIALS_PATH = "/appz/home/airflow/dags/credentials.json"
-EMAIL_ACCOUNT = Variable.get("EMAIL_ACCOUNT")  # Fetch from Airflow Variables
-LAST_CHECK_TIMESTAMP_FILE = "/appz/home/airflow/dags/last_checked_timestamp.json"
+# Load credentials and email from Airflow Variables
+GMAIL_CREDENTIALS = Variable.get("GMAIL_CREDENTIALS", deserialize_json=True)
+EMAIL_ID = Variable.get("EMAIL_ID")  # ✅ Renamed variable
+
+# File to store last processed timestamp (Updated Path)
+LAST_CHECK_TIMESTAMP_FILE = "/appz/cache/last_checked_timestamp.json"
 
 def authenticate_gmail():
-    """Authenticate Gmail API and verify that the correct email account is used."""
-    creds = None
-    if os.path.exists(CREDENTIALS_PATH):
-        creds = Credentials.from_authorized_user_file(CREDENTIALS_PATH)
+    """Authenticate Gmail API using stored credentials."""
+    creds = Credentials.from_authorized_user_info(GMAIL_CREDENTIALS)
     service = build("gmail", "v1", credentials=creds)
 
-    # Fetch authenticated email
+    # Verify authenticated email
     profile = service.users().getProfile(userId="me").execute()
     logged_in_email = profile.get("emailAddress", "")
 
-    if logged_in_email.lower() != EMAIL_ACCOUNT.lower():
-        raise ValueError(f"Wrong Gmail account! Expected {EMAIL_ACCOUNT}, but got {logged_in_email}")
+    if logged_in_email.lower() != EMAIL_ID.lower():
+        raise ValueError(f"Expected {EMAIL_ID}, but got {logged_in_email}")
 
     print(f"✅ Authenticated Gmail Account: {logged_in_email}")
     return service
 
 def get_last_checked_timestamp():
-    """Retrieve the last processed timestamp, or initialize it with the current timestamp."""
+    """Retrieve last processed timestamp, or set current timestamp if missing."""
     if os.path.exists(LAST_CHECK_TIMESTAMP_FILE):
         with open(LAST_CHECK_TIMESTAMP_FILE, "r") as f:
             return json.load(f).get("last_checked", int(time.time()))  # Default to current time
 
-    # If file does not exist, set it to the current timestamp
-    current_timestamp = int(time.time())  # Get current timestamp in seconds
+    # Initialize with the current timestamp
+    current_timestamp = int(time.time())
     update_last_checked_timestamp(current_timestamp)
     return current_timestamp
 
 def update_last_checked_timestamp(timestamp):
-    """Update the last processed timestamp in the file."""
+    """Update the last processed timestamp file."""
     with open(LAST_CHECK_TIMESTAMP_FILE, "w") as f:
         json.dump({"last_checked": timestamp}, f)
 
