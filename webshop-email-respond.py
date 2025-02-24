@@ -11,29 +11,28 @@ from googleapiclient.discovery import build
 default_args = {
     "owner": "airflow",
     "depends_on_past": False,
-    "start_date": datetime(2024, 2, 18),
+    "start_date": datetime(2024, 2, 24),  # ✅ Set to today's date
     "retries": 1,
     "retry_delay": timedelta(minutes=5),
 }
 
-CREDENTIALS_PATH = "/appz/home/airflow/dags/credentials.json"
-EMAIL_ACCOUNT = Variable.get("EMAIL_ACCOUNT")  # Fetch from Airflow Variables
+# Load credentials and email from Airflow Variables
+GMAIL_CREDENTIALS = Variable.get("GMAIL_CREDENTIALS", deserialize_json=True)
+EMAIL_ID = Variable.get("EMAIL_ID")  # ✅ Renamed variable
 
 def authenticate_gmail():
-    """Authenticate Gmail API and verify the correct email account is used."""
-    creds = None
-    if os.path.exists(CREDENTIALS_PATH):
-        creds = Credentials.from_authorized_user_file(CREDENTIALS_PATH)
+    """Authenticate Gmail API using stored credentials."""
+    creds = Credentials.from_authorized_user_info(GMAIL_CREDENTIALS)
     service = build("gmail", "v1", credentials=creds)
 
-    # Fetch authenticated email
+    # Verify authenticated email
     profile = service.users().getProfile(userId="me").execute()
     logged_in_email = profile.get("emailAddress", "")
 
-    if logged_in_email.lower() != EMAIL_ACCOUNT.lower():
-        raise ValueError(f"Wrong Gmail account! Expected {EMAIL_ACCOUNT}, but got {logged_in_email}")
+    if logged_in_email.lower() != EMAIL_ID.lower():
+        raise ValueError(f"Expected {EMAIL_ID}, but got {logged_in_email}")
 
-    print(f"Authenticated Gmail Account: {logged_in_email}")
+    print(f"✅ Authenticated Gmail Account: {logged_in_email}")
     return service
 
 def send_response(**kwargs):
@@ -54,7 +53,7 @@ def send_response(**kwargs):
         body={"raw": encoded_message}
     ).execute()
 
-    print(f"Response sent to {recipient}")
+    print(f"✅ Response sent to {recipient}")
 
 # Define DAG
 with DAG("webshop-email-respond",
