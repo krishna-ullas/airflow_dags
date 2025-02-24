@@ -4,6 +4,7 @@ from airflow.models import Variable
 from datetime import datetime, timedelta
 import base64
 import os
+import json
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
@@ -11,14 +12,19 @@ from googleapiclient.discovery import build
 default_args = {
     "owner": "airflow",
     "depends_on_past": False,
-    "start_date": datetime(2024, 2, 24),  # ✅ Set to today's date
+    "start_date": datetime(2024, 2, 24),  # ✅ Hardcoded for stability
     "retries": 1,
     "retry_delay": timedelta(minutes=5),
 }
 
 # Load credentials and email from Airflow Variables
-GMAIL_CREDENTIALS = Variable.get("GMAIL_CREDENTIALS", deserialize_json=True)
-EMAIL_ID = Variable.get("EMAIL_ID")  # ✅ Renamed variable
+raw_credentials = Variable.get("GMAIL_CREDENTIALS")  # Retrieve raw JSON string
+try:
+    GMAIL_CREDENTIALS = json.loads(raw_credentials)  # Manually parse JSON
+except json.JSONDecodeError as e:
+    raise ValueError(f"❌ JSON Parsing Error in GMAIL_CREDENTIALS: {e}")
+
+EMAIL_ID = Variable.get("EMAIL_ID")  # ✅ Updated variable name
 
 def authenticate_gmail():
     """Authenticate Gmail API using stored credentials."""
