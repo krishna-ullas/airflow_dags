@@ -17,7 +17,7 @@ default_args = {
 }
 
 # Configuration variables
-EMAIL_ACCOUNT = Variable.get("EMAIL_ACCOUNT")  # Fetch from Airflow Variables
+EMAIL_ID = Variable.get("EMAIL_ID")  # Fetch from Airflow Variables
 LAST_CHECK_TIMESTAMP_FILE = "/appz/cache/last_checked_timestamp.json"
 
 def authenticate_gmail():
@@ -36,8 +36,8 @@ def authenticate_gmail():
     profile = service.users().getProfile(userId="me").execute()
     logged_in_email = profile.get("emailAddress", "")
 
-    if logged_in_email.lower() != EMAIL_ACCOUNT.lower():
-        raise ValueError(f"Wrong Gmail account! Expected {EMAIL_ACCOUNT}, but got {logged_in_email}")
+    if logged_in_email.lower() != EMAIL_ID.lower():
+        raise ValueError(f"Wrong Gmail account! Expected {EMAIL_ID}, but got {logged_in_email}")
 
     print(f"✅ Authenticated Gmail Account: {logged_in_email}")
     return service
