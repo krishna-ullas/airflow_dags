@@ -3,7 +3,6 @@ from airflow.operators.python import PythonOperator
 from airflow.models import Variable
 from datetime import datetime, timedelta
 import base64
-import json
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
@@ -18,7 +17,7 @@ default_args = {
 
 # Fetch values from Airflow Variables
 EMAIL_ACCOUNT = Variable.get("EMAIL_ID")  # Gmail account email
-GMAIL_CREDENTIALS = json.loads(Variable.get("GMAIL_CREDENTIALS"))  # OAuth 2.0 credentials
+GMAIL_CREDENTIALS = Variable.get("GMAIL_CREDENTIALS", deserialize_json=True)  # Fetch credentials as JSON
 
 def authenticate_gmail():
     """Authenticate Gmail API using OAuth 2.0 tokens stored in Airflow Variables."""
@@ -38,7 +37,7 @@ def authenticate_gmail():
     logged_in_email = profile.get("emailAddress", "")
 
     if logged_in_email.lower() != EMAIL_ACCOUNT.lower():
-        raise ValueError(f"Wrong Gmail account! Expected {EMAIL_ACCOUNT}, but got {logged_in_email}")
+        raise ValueError(f"❌ Wrong Gmail account! Expected {EMAIL_ACCOUNT}, but got {logged_in_email}")
 
     print(f"✅ Authenticated Gmail Account: {logged_in_email}")
     return service
