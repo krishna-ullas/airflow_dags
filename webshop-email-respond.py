@@ -3,6 +3,7 @@ from airflow.operators.python import PythonOperator
 from airflow.models import Variable
 from datetime import datetime, timedelta
 import base64
+import json
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
@@ -15,24 +16,16 @@ default_args = {
     "retry_delay": timedelta(minutes=5),
 }
 
-# Fetch values from Airflow Variables
-EMAIL_ACCOUNT = Variable.get("EMAIL_ID")  # Gmail account email
-GMAIL_CREDENTIALS = Variable.get("GMAIL_CREDENTIALS", deserialize_json=True)  # Fetch credentials as JSON
+# Fetch configuration variables from Airflow
+EMAIL_ACCOUNT = Variable.get("EMAIL_ID")  # Fetch email from Airflow Variables
+GMAIL_CREDENTIALS = Variable.get("GMAIL_CREDENTIALS", deserialize_json=True)  # Fetch OAuth credentials
 
 def authenticate_gmail():
-    """Authenticate Gmail API using OAuth 2.0 tokens stored in Airflow Variables."""
-    creds = Credentials(
-        token=GMAIL_CREDENTIALS["access_token"],
-        refresh_token=GMAIL_CREDENTIALS["refresh_token"],
-        token_uri=GMAIL_CREDENTIALS["token_uri"],
-        client_id=GMAIL_CREDENTIALS["client_id"],
-        client_secret=GMAIL_CREDENTIALS["client_secret"],
-        scopes=GMAIL_CREDENTIALS["scopes"]
-    )
-
+    """Authenticate Gmail API and verify the correct email account is used."""
+    creds = Credentials.from_authorized_user_info(GMAIL_CREDENTIALS)
     service = build("gmail", "v1", credentials=creds)
 
-    # Verify authentication
+    # Fetch authenticated email
     profile = service.users().getProfile(userId="me").execute()
     logged_in_email = profile.get("emailAddress", "")
 
@@ -55,13 +48,16 @@ def send_response(**kwargs):
     encoded_message = base64.urlsafe_b64encode(email_msg.encode("utf-8")).decode("utf-8")
 
     # Send email response
-    service.users().messages().send(
-        userId="me",
-        body={"raw": encoded_message}
-    ).execute()
+    try:
+        service.users().messages().send(
+            userId="me",
+            body={"raw": encoded_message}
+        ).execute()
+        print(f"✅ Response sent to {recipient}")
+    except Exception as e:
+        print(f"❌ ERROR: Failed to send response email to {recipient}. Error: {e}")
 
-    print(f"✅ Response sent to {recipient}")
-
+# Define DAG
 with DAG("webshop-email-respond",
          default_args=default_args,
          schedule_interval=None,  # This DAG is triggered dynamically
