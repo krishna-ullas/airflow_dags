@@ -2,65 +2,58 @@ from airflow import DAG
 from airflow.operators.python import PythonOperator
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.models import Variable
+from airflow.providers.google.common.hooks.discovery_api import GoogleDiscoveryApiHook
 from datetime import datetime, timedelta
-import os
 import json
 import time
-import base64
-from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
 
 # Default DAG arguments
 default_args = {
     "owner": "airflow",
     "depends_on_past": False,
-    "start_date": datetime(2024, 2, 24),  # ✅ Hardcoded for stability
+    "start_date": datetime(2024, 2, 18),
     "retries": 1,
     "retry_delay": timedelta(minutes=5),
 }
 
-# Load credentials and email from Airflow Variables
-try:
-    raw_credentials = Variable.get("GMAIL_CREDENTIALS")  # Get as raw string
-    if not raw_credentials:
-        raise ValueError("GMAIL_CREDENTIALS is empty in Airflow Variables!")
-
-    GMAIL_CREDENTIALS = json.loads(raw_credentials)  # ✅ Manually parse JSON
-except Exception as e:
-    raise ValueError(f"❌ Error retrieving GMAIL_CREDENTIALS: {e}")
-
-EMAIL_ID = Variable.get("EMAIL_ID")  # ✅ Updated variable name
-
-# Updated timestamp storage path
+# Configuration variables
+EMAIL_ACCOUNT = Variable.get("EMAIL_ACCOUNT")  # Fetch from Airflow Variables
 LAST_CHECK_TIMESTAMP_FILE = "/appz/cache/last_checked_timestamp.json"
 
 def authenticate_gmail():
-    """Authenticate Gmail API using stored credentials."""
-    creds = Credentials.from_authorized_user_info(GMAIL_CREDENTIALS)
-    service = build("gmail", "v1", credentials=creds)
+    """Authenticate Gmail API using Airflow's Google Cloud Connection."""
+    
+    hook = GoogleDiscoveryApiHook(
+        gcp_conn_id="gmail_api",  # Using Airflow Connection
+        api_service_name="gmail",
+        api_version="v1",
+        scopes=["https://www.googleapis.com/auth/gmail.readonly"]
+    )
+    
+    service = hook.get_conn()
 
-    # Verify authenticated email
+    # Fetch authenticated email
     profile = service.users().getProfile(userId="me").execute()
     logged_in_email = profile.get("emailAddress", "")
 
-    if logged_in_email.lower() != EMAIL_ID.lower():
-        raise ValueError(f"Expected {EMAIL_ID}, but got {logged_in_email}")
+    if logged_in_email.lower() != EMAIL_ACCOUNT.lower():
+        raise ValueError(f"Wrong Gmail account! Expected {EMAIL_ACCOUNT}, but got {logged_in_email}")
 
     print(f"✅ Authenticated Gmail Account: {logged_in_email}")
     return service
 
 def get_last_checked_timestamp():
-    """Retrieve last processed timestamp, or initialize it."""
-    if os.path.exists(LAST_CHECK_TIMESTAMP_FILE):
+    """Retrieve the last processed timestamp, or initialize it with the current timestamp."""
+    try:
         with open(LAST_CHECK_TIMESTAMP_FILE, "r") as f:
             return json.load(f).get("last_checked", int(time.time()))
-
-    current_timestamp = int(time.time())
-    update_last_checked_timestamp(current_timestamp)
-    return current_timestamp
+    except FileNotFoundError:
+        current_timestamp = int(time.time())  # Get current timestamp in seconds
+        update_last_checked_timestamp(current_timestamp)
+        return current_timestamp
 
 def update_last_checked_timestamp(timestamp):
-    """Update the last processed timestamp file."""
+    """Update the last processed timestamp in the file."""
     with open(LAST_CHECK_TIMESTAMP_FILE, "w") as f:
         json.dump({"last_checked": timestamp}, f)
 
@@ -80,10 +73,12 @@ def fetch_unread_emails(**kwargs):
     for msg in messages:
         msg_data = service.users().messages().get(userId="me", id=msg["id"]).execute()
         
+        # Extract email details
         headers = {header["name"]: header["value"] for header in msg_data["payload"]["headers"]}
         sender = headers.get("From", "").lower()
-        timestamp = int(msg_data["internalDate"])
+        timestamp = int(msg_data["internalDate"])  # Timestamp in milliseconds
 
+        # Skip no-reply emails and previously processed emails
         if "no-reply" in sender or timestamp <= last_checked_timestamp:
             continue
 
@@ -93,11 +88,13 @@ def fetch_unread_emails(**kwargs):
         if timestamp > max_timestamp:
             max_timestamp = timestamp
 
+    # Update last checked timestamp only if new emails were found
     if unread_emails:
         update_last_checked_timestamp(max_timestamp)
 
     kwargs['ti'].xcom_push(key="unread_emails", value=unread_emails)
 
+# Define DAG
 with DAG("webshop-email-listener",
          default_args=default_args,
          schedule_interval=timedelta(minutes=1),
@@ -110,6 +107,7 @@ with DAG("webshop-email-listener",
     )
 
     def trigger_response_tasks(**kwargs):
+        """Trigger 'webshop-email-respond' for each unread email."""
         ti = kwargs['ti']
         unread_emails = ti.xcom_pull(task_ids="fetch_unread_emails", key="unread_emails")
 
