@@ -2,33 +2,35 @@ from airflow import DAG
 from airflow.operators.python import PythonOperator
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.models import Variable
+from airflow.providers.google.common.hooks.discovery_api import GoogleDiscoveryApiHook
 from datetime import datetime, timedelta
-import os
 import json
 import time
-from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
 
 # Default DAG arguments
 default_args = {
     "owner": "airflow",
     "depends_on_past": False,
-    "start_date": datetime(2024, 2, 18),
+    "start_date": datetime(2024, 2, 25),
     "retries": 1,
     "retry_delay": timedelta(minutes=5),
 }
 
 # Configuration variables
-CREDENTIALS_PATH = "/appz/scripts/credentials.json"
 EMAIL_ACCOUNT = Variable.get("EMAIL_ACCOUNT")  # Fetch from Airflow Variables
-LAST_CHECK_TIMESTAMP_FILE = "/appz/home/airflow/dags/last_checked_timestamp.json"
+LAST_CHECK_TIMESTAMP_FILE = "/appz/cache/last_checked_timestamp.json"
 
 def authenticate_gmail():
-    """Authenticate Gmail API and verify that the correct email account is used."""
-    creds = None
-    if os.path.exists(CREDENTIALS_PATH):
-        creds = Credentials.from_authorized_user_file(CREDENTIALS_PATH)
-    service = build("gmail", "v1", credentials=creds)
+    """Authenticate Gmail API using Airflow's Google Cloud Connection."""
+    
+    hook = GoogleDiscoveryApiHook(
+        gcp_conn_id="gmail_api",  # Using Airflow Connection
+        api_service_name="gmail",
+        api_version="v1",
+        scopes=["https://www.googleapis.com/auth/gmail.readonly"]
+    )
+    
+    service = hook.get_conn()
 
     # Fetch authenticated email
     profile = service.users().getProfile(userId="me").execute()
@@ -42,14 +44,13 @@ def authenticate_gmail():
 
 def get_last_checked_timestamp():
     """Retrieve the last processed timestamp, or initialize it with the current timestamp."""
-    if os.path.exists(LAST_CHECK_TIMESTAMP_FILE):
+    try:
         with open(LAST_CHECK_TIMESTAMP_FILE, "r") as f:
-            return json.load(f).get("last_checked", int(time.time()))  # Default to current time
-
-    # If file does not exist, set it to the current timestamp
-    current_timestamp = int(time.time())  # Get current timestamp in seconds
-    update_last_checked_timestamp(current_timestamp)
-    return current_timestamp
+            return json.load(f).get("last_checked", int(time.time()))
+    except FileNotFoundError:
+        current_timestamp = int(time.time())  # Get current timestamp in seconds
+        update_last_checked_timestamp(current_timestamp)
+        return current_timestamp
 
 def update_last_checked_timestamp(timestamp):
     """Update the last processed timestamp in the file."""
