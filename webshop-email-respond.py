@@ -1,39 +1,44 @@
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 from airflow.models import Variable
-from airflow.providers.google.common.hooks.discovery_api import GoogleDiscoveryApiHook
 from datetime import datetime, timedelta
 import base64
+import json
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
 
 # Default DAG arguments
 default_args = {
     "owner": "airflow",
     "depends_on_past": False,
-    "start_date": datetime(2024, 2, 25),
+    "start_date": datetime(2024, 2, 18),
     "retries": 1,
     "retry_delay": timedelta(minutes=5),
 }
 
-EMAIL_ACCOUNT = Variable.get("EMAIL_ID")  # Fetch from Airflow Variables
+# Fetch values from Airflow Variables
+EMAIL_ACCOUNT = Variable.get("EMAIL_ID")  # Gmail account email
+GMAIL_CREDENTIALS = json.loads(Variable.get("GMAIL_CREDENTIALS"))  # OAuth 2.0 credentials
 
 def authenticate_gmail():
-    """Authenticate Gmail API using Airflow's Google Cloud Connection."""
-    
-    hook = GoogleDiscoveryApiHook(
-        gcp_conn_id="gmail_api",  # Using Airflow Connection
-        api_service_name="gmail",
-        api_version="v1",
-        scopes=["https://www.googleapis.com/auth/gmail.send"]
+    """Authenticate Gmail API using OAuth 2.0 tokens stored in Airflow Variables."""
+    creds = Credentials(
+        token=GMAIL_CREDENTIALS["access_token"],
+        refresh_token=GMAIL_CREDENTIALS["refresh_token"],
+        token_uri=GMAIL_CREDENTIALS["token_uri"],
+        client_id=GMAIL_CREDENTIALS["client_id"],
+        client_secret=GMAIL_CREDENTIALS["client_secret"],
+        scopes=GMAIL_CREDENTIALS["scopes"]
     )
-    
-    service = hook.get_conn()
 
-    # Fetch authenticated email
+    service = build("gmail", "v1", credentials=creds)
+
+    # Verify authentication
     profile = service.users().getProfile(userId="me").execute()
     logged_in_email = profile.get("emailAddress", "")
 
-    if logged_in_email.lower() != EMAIL_ID.lower():
-        raise ValueError(f"Wrong Gmail account! Expected {EMAIL_ID}, but got {logged_in_email}")
+    if logged_in_email.lower() != EMAIL_ACCOUNT.lower():
+        raise ValueError(f"Wrong Gmail account! Expected {EMAIL_ACCOUNT}, but got {logged_in_email}")
 
     print(f"✅ Authenticated Gmail Account: {logged_in_email}")
     return service
@@ -58,7 +63,6 @@ def send_response(**kwargs):
 
     print(f"✅ Response sent to {recipient}")
 
-# Define DAG
 with DAG("webshop-email-respond",
          default_args=default_args,
          schedule_interval=None,  # This DAG is triggered dynamically
