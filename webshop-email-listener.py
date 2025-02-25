@@ -3,6 +3,9 @@ from airflow.operators.python import PythonOperator
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.models import Variable
 from datetime import datetime, timedelta
+import os
+import json
+import time
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
@@ -10,29 +13,22 @@ from googleapiclient.discovery import build
 default_args = {
     "owner": "airflow",
     "depends_on_past": False,
-    "start_date": datetime(2024, 2, 18),
+    "start_date": datetime(2024, 2, 24),
     "retries": 1,
     "retry_delay": timedelta(minutes=5),
 }
 
-# Fetch values from Airflow Variables
-EMAIL_ACCOUNT = Variable.get("EMAIL_ID")  # Gmail account email
-GMAIL_CREDENTIALS = Variable.get("GMAIL_CREDENTIALS", deserialize_json=True)  # Fetch credentials as JSON
+# Configuration variables
+EMAIL_ACCOUNT = Variable.get("EMAIL_ID")  # Fetch email from Airflow Variables
+GMAIL_CREDENTIALS = Variable.get("GMAIL_CREDENTIALS", deserialize_json=True)  # Fetch OAuth credentials
+LAST_CHECK_TIMESTAMP_FILE = "/appz/cache/last_checked_timestamp.json"  # Updated timestamp file location
 
 def authenticate_gmail():
-    """Authenticate Gmail API using OAuth 2.0 tokens stored in Airflow Variables."""
-    creds = Credentials(
-        token=GMAIL_CREDENTIALS["access_token"],
-        refresh_token=GMAIL_CREDENTIALS["refresh_token"],
-        token_uri=GMAIL_CREDENTIALS["token_uri"],
-        client_id=GMAIL_CREDENTIALS["client_id"],
-        client_secret=GMAIL_CREDENTIALS["client_secret"],
-        scopes=GMAIL_CREDENTIALS["scopes"]
-    )
-
+    """Authenticate Gmail API and verify that the correct email account is used."""
+    creds = Credentials.from_authorized_user_info(GMAIL_CREDENTIALS)
     service = build("gmail", "v1", credentials=creds)
 
-    # Verify authentication
+    # Fetch authenticated email
     profile = service.users().getProfile(userId="me").execute()
     logged_in_email = profile.get("emailAddress", "")
 
@@ -42,25 +38,61 @@ def authenticate_gmail():
     print(f"✅ Authenticated Gmail Account: {logged_in_email}")
     return service
 
+def get_last_checked_timestamp():
+    """Retrieve the last processed timestamp, or initialize it with the current timestamp."""
+    if os.path.exists(LAST_CHECK_TIMESTAMP_FILE):
+        with open(LAST_CHECK_TIMESTAMP_FILE, "r") as f:
+            return json.load(f).get("last_checked", int(time.time()))  # Default to current time
+
+    # If file does not exist, set it to the current timestamp
+    current_timestamp = int(time.time())  # Get current timestamp in seconds
+    update_last_checked_timestamp(current_timestamp)
+    return current_timestamp
+
+def update_last_checked_timestamp(timestamp):
+    """Update the last processed timestamp in the file."""
+    os.makedirs(os.path.dirname(LAST_CHECK_TIMESTAMP_FILE), exist_ok=True)  # Ensure directory exists
+    with open(LAST_CHECK_TIMESTAMP_FILE, "w") as f:
+        json.dump({"last_checked": timestamp}, f)
+
 def fetch_unread_emails(**kwargs):
-    """Fetch unread emails from Gmail."""
+    """Fetch unread emails received after the last processed timestamp."""
     service = authenticate_gmail()
     
-    query = "is:unread"
+    last_checked_timestamp = get_last_checked_timestamp()
+    query = f"is:unread after:{last_checked_timestamp}"
 
     results = service.users().messages().list(userId="me", labelIds=["INBOX"], q=query).execute()
     messages = results.get("messages", [])
 
     unread_emails = []
+    max_timestamp = last_checked_timestamp
 
     for msg in messages:
         msg_data = service.users().messages().get(userId="me", id=msg["id"]).execute()
+        
+        # Extract email details
         headers = {header["name"]: header["value"] for header in msg_data["payload"]["headers"]}
+        sender = headers.get("From", "").lower()
+        timestamp = int(msg_data["internalDate"])  # Timestamp in milliseconds
+
+        # Skip no-reply emails and previously processed emails
+        if "no-reply" in sender or timestamp <= last_checked_timestamp:
+            continue
+
         body = msg_data.get("snippet", "")
-        unread_emails.append({"id": msg["id"], "headers": headers, "content": body})
+        unread_emails.append({"id": msg["id"], "headers": headers, "content": body, "timestamp": timestamp})
+
+        if timestamp > max_timestamp:
+            max_timestamp = timestamp
+
+    # Update last checked timestamp only if new emails were found
+    if unread_emails:
+        update_last_checked_timestamp(max_timestamp)
 
     kwargs['ti'].xcom_push(key="unread_emails", value=unread_emails)
 
+# Define DAG
 with DAG("webshop-email-listener",
          default_args=default_args,
          schedule_interval=timedelta(minutes=1),
