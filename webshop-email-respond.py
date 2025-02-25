@@ -14,7 +14,7 @@ default_args = {
     "retry_delay": timedelta(minutes=5),
 }
 
-EMAIL_ACCOUNT = Variable.get("EMAIL_ACCOUNT")  # Fetch from Airflow Variables
+EMAIL_ACCOUNT = Variable.get("EMAIL_ID")  # Fetch from Airflow Variables
 
 def authenticate_gmail():
     """Authenticate Gmail API using Airflow's Google Cloud Connection."""
@@ -32,8 +32,8 @@ def authenticate_gmail():
     profile = service.users().getProfile(userId="me").execute()
     logged_in_email = profile.get("emailAddress", "")
 
-    if logged_in_email.lower() != EMAIL_ACCOUNT.lower():
-        raise ValueError(f"Wrong Gmail account! Expected {EMAIL_ACCOUNT}, but got {logged_in_email}")
+    if logged_in_email.lower() != EMAIL_ID.lower():
+        raise ValueError(f"Wrong Gmail account! Expected {EMAIL_ID}, but got {logged_in_email}")
 
     print(f"✅ Authenticated Gmail Account: {logged_in_email}")
     return service
