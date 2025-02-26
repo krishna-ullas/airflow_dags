@@ -4,8 +4,8 @@ from airflow.models import Variable
 from datetime import datetime, timedelta
 import base64
 import json
-import re
 import logging
+import re
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from ollama import Client  
@@ -50,23 +50,14 @@ def get_ai_response(user_query):
 
     return response['message']['content']  
 
-def clean_html(html_content):
-    soup = BeautifulSoup(html_content, "html.parser")
-    text = soup.get_text(separator="\n")
-
-    text = text.strip()
-    text = re.sub(r'^["\']{3}|["\']{3}$', '', text).strip()
-    text = re.sub(r'\n{2,}', '\n', text).strip()
-
-    return text
-
 def send_response(**kwargs):
-    email_data = kwargs['dag_run'].conf  
+    email_data = kwargs['dag_run'].conf.get("email_data", {})  
 
     logging.info(f"Received email data: {email_data}")  
 
-    if "headers" not in email_data:
-        raise KeyError("Missing 'headers' key in email data.")
+    if not email_data:
+        logging.warning("⚠️ No email data received! This DAG was likely triggered manually.")
+        return  
 
     service = authenticate_gmail()
 
@@ -75,7 +66,7 @@ def send_response(**kwargs):
     user_query = email_data["content"]
 
     ai_response_html = get_ai_response(user_query)
-    ai_response_text = clean_html(ai_response_html)
+    ai_response_text = BeautifulSoup(ai_response_html, "html.parser").get_text()
 
     msg = MIMEMultipart()
     msg["From"] = "me"
