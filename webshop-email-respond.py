@@ -38,7 +38,7 @@ def authenticate_gmail():
 
 def get_ai_response(user_query):
     client = Client(
-        host='http://agentomatic:8080',  
+        host='http://agentomatic:8000',
         headers={'x-ltai-client': 'webshop-email-respond'}
     )
 
