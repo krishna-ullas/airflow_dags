@@ -64,7 +64,7 @@ def send_response(**kwargs):
     sender_email = email_data["headers"].get("From", "")
     subject = f"Re: {email_data['headers'].get('Subject', 'No Subject')}"
     user_query = email_data["content"]
-
+    ai_response_html = get_ai_response(user_query)
     ai_response_html = re.sub(r"^```(?:html)?\n?|```$", "", ai_response_html.strip(), flags=re.MULTILINE)
 
     msg = MIMEMultipart()
