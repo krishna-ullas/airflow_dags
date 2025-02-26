@@ -44,8 +44,8 @@ def get_ai_response(user_query):
 
     response = client.chat(
         model='webshop-email:0.5',
-        messages=[{"role": "user", "content": user_query}],
-        stream=False  
+        messages=[{"role": "user", "content": 'I am looking for the status of the order 788; Please let me know when I would receive the shipment'}],
+        stream=True  
     )
 
     return response['message']['content']  
