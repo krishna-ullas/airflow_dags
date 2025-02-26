@@ -47,12 +47,8 @@ def get_ai_response(user_query):
         messages=[{"role": "user", "content": user_query}],
         stream=False
     )
-    full_content=""
-    for chunk in response:
-        full_content += chunk['message']['content']
-    logging.info(f"Full content: {full_content}")
-
-    return full_content
+    
+    return response['message']['content']
 
 def send_response(**kwargs):
     email_data = kwargs['dag_run'].conf.get("email_data", {})  
