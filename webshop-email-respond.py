@@ -65,14 +65,12 @@ def send_response(**kwargs):
     subject = f"Re: {email_data['headers'].get('Subject', 'No Subject')}"
     user_query = email_data["content"]
 
-    ai_response_html = get_ai_response(user_query)
-    ai_response_text = BeautifulSoup(ai_response_html, "html.parser").get_text()
+    ai_response_html = re.sub(r"^```(?:html)?\n?|```$", "", ai_response_html.strip(), flags=re.MULTILINE)
 
     msg = MIMEMultipart()
     msg["From"] = "me"
     msg["To"] = sender_email
     msg["Subject"] = subject
-    msg.attach(MIMEText(ai_response_text, "plain"))
     msg.attach(MIMEText(ai_response_html, "html"))
 
     service.users().messages().send(userId="me", body={"raw": base64.urlsafe_b64encode(msg.as_string().encode("utf-8")).decode("utf-8")}).execute()
