@@ -47,8 +47,10 @@ def get_ai_response(user_query):
         messages=[{"role": "user", "content": 'I am looking for the status of the order 788; Please let me know when I would receive the shipment'}],
         stream=True  
     )
+    for chunk in response:
+        full_content += chunk['message']['content']
 
-    return response['message']['content']  
+    return 0  
 
 def send_response(**kwargs):
     email_data = kwargs['dag_run'].conf.get("email_data", {})  
