@@ -25,11 +25,10 @@ GMAIL_CREDENTIALS = Variable.get("GMAIL_CREDENTIALS", deserialize_json=True)
 LAST_CHECK_TIMESTAMP_FILE = "/appz/cache/last_checked_timestamp.json"  
 
 def authenticate_gmail():
-    """Authenticate Gmail API and verify that the correct email account is used."""
+    """Authenticate Gmail API and verify the correct email account is used."""
     creds = Credentials.from_authorized_user_info(GMAIL_CREDENTIALS)
     service = build("gmail", "v1", credentials=creds)
 
-    # Fetch authenticated email
     profile = service.users().getProfile(userId="me").execute()
     logged_in_email = profile.get("emailAddress", "")
 
@@ -40,7 +39,7 @@ def authenticate_gmail():
     return service
 
 def get_last_checked_timestamp():
-    """Retrieve the last processed timestamp, or initialize it with the current timestamp."""
+    """Retrieve the last processed timestamp or initialize with the current timestamp."""
     if os.path.exists(LAST_CHECK_TIMESTAMP_FILE):
         with open(LAST_CHECK_TIMESTAMP_FILE, "r") as f:
             return json.load(f).get("last_checked", int(time.time()))  
@@ -109,18 +108,25 @@ with DAG("webshop-email-listener",
     )
 
     def trigger_response_tasks(**kwargs):
-        """Trigger 'webshop-email-respond' for each unread email."""
         ti = kwargs['ti']
         unread_emails = ti.xcom_pull(task_ids="fetch_unread_emails", key="unread_emails")
 
-        if unread_emails:
-            for email in unread_emails:
-                logging.info(f"Triggering response DAG with email data: {email}")  
-                TriggerDagRunOperator(
-                    task_id=f"trigger_response_{email['id']}",
-                    trigger_dag_id="webshop-email-respond",
-                    conf=email
-                ).execute(context=kwargs)
+        if not unread_emails:
+            logging.info("No unread emails found, skipping trigger.")
+            return
+
+        for email in unread_emails:
+            task_id = f"trigger_response_{email['id'].replace('-', '_')}"  
+
+            logging.info(f"Triggering Response DAG with email data: {email}")  
+
+            trigger_task = TriggerDagRunOperator(
+                task_id=task_id,
+                trigger_dag_id="webshop-email-respond",
+                conf={"email_data": email},
+            )
+
+            trigger_task.execute(context=kwargs)  
 
     trigger_email_response_task = PythonOperator(
         task_id="trigger-email-response-dag",
