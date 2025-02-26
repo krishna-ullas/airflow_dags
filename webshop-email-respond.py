@@ -43,7 +43,7 @@ def authenticate_gmail():
 def get_ai_response(user_query):
     """Send the email content to the AI agent and return the response."""
     client = Client(
-        host='http://agentomatic:8000',  # Replace with actual agent server
+        host='http://agentomatic:8080',  # Replace with actual agent server
         headers={'x-ltai-client': 'webshop-email-respond'}
     )
 
