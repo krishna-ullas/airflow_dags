@@ -50,6 +50,7 @@ def get_ai_response(user_query):
     full_content=""
     for chunk in response:
         full_content += chunk['message']['content']
+    logging.info(f"Full content: {full_content}")
 
     return full_content
 
