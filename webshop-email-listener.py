@@ -39,45 +39,55 @@ def authenticate_gmail():
     return service
 
 def get_last_checked_timestamp():
-    """Retrieve the last processed email timestamp or fetch all unread emails if no responses exist."""
+    """Retrieve the last processed email timestamp or initialize with current time if file does not exist."""
     if os.path.exists(LAST_PROCESSED_EMAIL_FILE):
         with open(LAST_PROCESSED_EMAIL_FILE, "r") as f:
             last_checked = json.load(f).get("last_processed", None)
             if last_checked:
-                logging.info(f"📅 Retrieved last processed email timestamp: {last_checked}")
+                if last_checked > 10**10:  # Convert from milliseconds if needed
+                    last_checked = last_checked // 1000
+                logging.info(f"📅 Retrieved last processed email timestamp (seconds): {last_checked}")
                 return last_checked
 
     # If no response emails have been sent, fetch all unread emails
-    logging.info("🚀 No responses sent yet, fetching all unread emails.")
-    return None
+    current_timestamp = int(time.time())  # Get current timestamp in seconds
+    logging.info(f"🚀 No responses sent yet, setting timestamp to {current_timestamp}")
+    update_last_checked_timestamp(current_timestamp)
+    return current_timestamp
+
+def update_last_checked_timestamp(timestamp):
+    """Update the last processed email timestamp in seconds."""
+    os.makedirs(os.path.dirname(LAST_PROCESSED_EMAIL_FILE), exist_ok=True)
+    with open(LAST_PROCESSED_EMAIL_FILE, "w") as f:
+        json.dump({"last_processed": timestamp}, f)
+    logging.info(f"✅ Updated last processed email timestamp: {timestamp}")
 
 def fetch_unread_emails(**kwargs):
-    """Fetch unread emails received after the last processed email timestamp, or all unread emails if no responses exist."""
+    """Fetch unread emails received after the last processed email timestamp."""
     service = authenticate_gmail()
     
     last_checked_timestamp = get_last_checked_timestamp()
-    if last_checked_timestamp:
-        query = f"is:unread after:{last_checked_timestamp}"
-        logging.info(f"🕒 Checking for unread emails after timestamp: {last_checked_timestamp}")
-    else:
-        query = "is:unread"  # Fetch all unread emails
-        logging.info("📩 Fetching all unread emails (no timestamp filter).")
+    query = f"is:unread after:{last_checked_timestamp}"
+    logging.info(f"🔍 Fetching emails with query: {query}")
 
     results = service.users().messages().list(userId="me", labelIds=["INBOX"], q=query).execute()
     messages = results.get("messages", [])
-    logging.info(f"📬 Found {len(messages)} unread emails in query results.")
+
+    logging.info(f"📬 Found {len(messages)} unread emails.")
 
     unread_emails = []
-    max_timestamp = last_checked_timestamp if last_checked_timestamp else int(time.time())
+    max_timestamp = last_checked_timestamp
 
     for msg in messages:
         msg_data = service.users().messages().get(userId="me", id=msg["id"]).execute()
 
         headers = {header["name"]: header["value"] for header in msg_data["payload"]["headers"]}
         sender = headers.get("From", "").lower()
-        timestamp = int(msg_data["internalDate"])  
+        timestamp = int(msg_data["internalDate"]) // 1000  # ✅ Convert from ms to s
 
-        if "no-reply" in sender:
+        logging.info(f"📨 Processing email from {sender}, timestamp: {timestamp}")
+
+        if "no-reply" in sender or timestamp <= last_checked_timestamp:
             logging.info(f"⏩ Skipping email from {sender} (timestamp: {timestamp})")
             continue
 
@@ -95,15 +105,13 @@ def fetch_unread_emails(**kwargs):
         if timestamp > max_timestamp:
             max_timestamp = timestamp
 
-    # Push emails to XCom
+    # ✅ Update last processed email timestamp only if new emails were found
+    if unread_emails:
+        update_last_checked_timestamp(max_timestamp)
+
     kwargs['ti'].xcom_push(key="unread_emails", value=unread_emails)
 
-    # ✅ Update last processed email timestamp
-    if max_timestamp > (last_checked_timestamp or 0):
-        with open(LAST_PROCESSED_EMAIL_FILE, "w") as f:
-            json.dump({"last_processed": max_timestamp}, f)
-        logging.info(f"✅ Updated last processed email timestamp: {max_timestamp}")
-
+# Define DAG
 with DAG("webshop-email-listener",
          default_args=default_args,
          schedule_interval=timedelta(minutes=1),
@@ -116,6 +124,7 @@ with DAG("webshop-email-listener",
     )
 
     def trigger_response_tasks(**kwargs):
+        """Trigger 'webshop-email-respond' for each unread email."""
         ti = kwargs['ti']
         unread_emails = ti.xcom_pull(task_ids="fetch_unread_emails", key="unread_emails")
 
