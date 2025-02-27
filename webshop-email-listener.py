@@ -39,40 +39,34 @@ def authenticate_gmail():
     return service
 
 def get_last_checked_timestamp():
-    """Retrieve the last processed email timestamp, ensuring it's in seconds."""
+    """Retrieve the last processed timestamp, ensuring it's in milliseconds."""
     if os.path.exists(LAST_PROCESSED_EMAIL_FILE):
         with open(LAST_PROCESSED_EMAIL_FILE, "r") as f:
             last_checked = json.load(f).get("last_processed", None)
             if last_checked:
-                if last_checked > 10**10:  # Convert from milliseconds if needed
-                    last_checked = last_checked // 1000
-                logging.info(f"📅 Retrieved last processed email timestamp (seconds): {last_checked}")
+                logging.info(f"📅 Retrieved last processed email timestamp (milliseconds): {last_checked}")
                 return last_checked
 
     # If no previous timestamp, start fresh
-    current_timestamp = int(time.time())
-    logging.info(f"🚀 No previous timestamp, initializing to {current_timestamp}")
-    update_last_checked_timestamp(current_timestamp)
-    return current_timestamp
+    current_timestamp_ms = int(time.time() * 1000)  # Store in milliseconds
+    logging.info(f"🚀 No previous timestamp, initializing to {current_timestamp_ms}")
+    update_last_checked_timestamp(current_timestamp_ms)
+    return current_timestamp_ms
 
 def update_last_checked_timestamp(timestamp):
-    """Update the last processed email timestamp in seconds."""
+    """Ensure the timestamp is stored in milliseconds."""
     os.makedirs(os.path.dirname(LAST_PROCESSED_EMAIL_FILE), exist_ok=True)
     with open(LAST_PROCESSED_EMAIL_FILE, "w") as f:
         json.dump({"last_processed": timestamp}, f)
-    logging.info(f"✅ Updated last processed email timestamp: {timestamp}")
+    logging.info(f"✅ Updated last processed email timestamp (milliseconds): {timestamp}")
 
 def fetch_unread_emails(**kwargs):
     """Fetch unread emails received after the last processed email timestamp."""
     service = authenticate_gmail()
     
     last_checked_timestamp = get_last_checked_timestamp()
-    
-    # Ensure timestamp is in SECONDS, as Gmail's internalDate is in MILLISECONDS
-    if last_checked_timestamp > 10**10:  
-        last_checked_timestamp = last_checked_timestamp // 1000
 
-    query = f"is:unread after:{last_checked_timestamp}"
+    query = f"is:unread after:{last_checked_timestamp // 1000}"  # Convert milliseconds to seconds for Gmail API
     logging.info(f"🔍 Fetching emails with query: {query}")
 
     results = service.users().messages().list(userId="me", labelIds=["INBOX"], q=query).execute()
@@ -88,7 +82,7 @@ def fetch_unread_emails(**kwargs):
         
         headers = {header["name"]: header["value"] for header in msg_data["payload"]["headers"]}
         sender = headers.get("From", "").lower()
-        timestamp = int(msg_data["internalDate"]) // 1000  # ✅ Convert ms → s
+        timestamp = int(msg_data["internalDate"])  # Already in milliseconds
 
         logging.info(f"📨 Processing email from {sender}, timestamp: {timestamp}")
 
@@ -111,7 +105,7 @@ def fetch_unread_emails(**kwargs):
             max_timestamp = timestamp
 
     if unread_emails:
-        update_last_checked_timestamp(max_timestamp)  # ✅ Save timestamp in SECONDS
+        update_last_checked_timestamp(max_timestamp)
 
     kwargs['ti'].xcom_push(key="unread_emails", value=unread_emails)
 
