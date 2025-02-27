@@ -52,11 +52,12 @@ def get_last_checked_timestamp():
     return None  # This tells fetch_unread_emails() to check all unread emails
 
 def update_last_checked_timestamp(timestamp):
-    """Ensure the timestamp is stored in milliseconds."""
+    """Ensure the timestamp is stored in milliseconds and prevent reprocessing."""
+    new_timestamp = timestamp + 1  # ✅ Add 1ms to prevent reprocessing the same email
     os.makedirs(os.path.dirname(LAST_PROCESSED_EMAIL_FILE), exist_ok=True)
     with open(LAST_PROCESSED_EMAIL_FILE, "w") as f:
-        json.dump({"last_processed": timestamp}, f)
-    logging.info(f"✅ Updated last processed email timestamp (milliseconds): {timestamp}")
+        json.dump({"last_processed": new_timestamp}, f)
+    logging.info(f"✅ Updated last processed email timestamp (milliseconds): {new_timestamp}")
 
 def fetch_unread_emails(**kwargs):
     """Fetch unread emails received after the last processed email timestamp."""
