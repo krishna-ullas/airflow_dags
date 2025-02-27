@@ -39,7 +39,7 @@ def authenticate_gmail():
     return service
 
 def get_last_checked_timestamp():
-    """Retrieve the last processed email timestamp or initialize with current time if file does not exist."""
+    """Retrieve the last processed email timestamp, ensuring it's in seconds."""
     if os.path.exists(LAST_PROCESSED_EMAIL_FILE):
         with open(LAST_PROCESSED_EMAIL_FILE, "r") as f:
             last_checked = json.load(f).get("last_processed", None)
@@ -49,9 +49,9 @@ def get_last_checked_timestamp():
                 logging.info(f"📅 Retrieved last processed email timestamp (seconds): {last_checked}")
                 return last_checked
 
-    # If no response emails have been sent, fetch all unread emails
-    current_timestamp = int(time.time())  # Get current timestamp in seconds
-    logging.info(f"🚀 No responses sent yet, setting timestamp to {current_timestamp}")
+    # If no previous timestamp, start fresh
+    current_timestamp = int(time.time())
+    logging.info(f"🚀 No previous timestamp, initializing to {current_timestamp}")
     update_last_checked_timestamp(current_timestamp)
     return current_timestamp
 
@@ -67,6 +67,11 @@ def fetch_unread_emails(**kwargs):
     service = authenticate_gmail()
     
     last_checked_timestamp = get_last_checked_timestamp()
+    
+    # Ensure timestamp is in SECONDS, as Gmail's internalDate is in MILLISECONDS
+    if last_checked_timestamp > 10**10:  
+        last_checked_timestamp = last_checked_timestamp // 1000
+
     query = f"is:unread after:{last_checked_timestamp}"
     logging.info(f"🔍 Fetching emails with query: {query}")
 
@@ -80,10 +85,10 @@ def fetch_unread_emails(**kwargs):
 
     for msg in messages:
         msg_data = service.users().messages().get(userId="me", id=msg["id"]).execute()
-
+        
         headers = {header["name"]: header["value"] for header in msg_data["payload"]["headers"]}
         sender = headers.get("From", "").lower()
-        timestamp = int(msg_data["internalDate"]) // 1000  # ✅ Convert from ms to s
+        timestamp = int(msg_data["internalDate"]) // 1000  # ✅ Convert ms → s
 
         logging.info(f"📨 Processing email from {sender}, timestamp: {timestamp}")
 
@@ -105,9 +110,8 @@ def fetch_unread_emails(**kwargs):
         if timestamp > max_timestamp:
             max_timestamp = timestamp
 
-    # ✅ Update last processed email timestamp only if new emails were found
     if unread_emails:
-        update_last_checked_timestamp(max_timestamp)
+        update_last_checked_timestamp(max_timestamp)  # ✅ Save timestamp in SECONDS
 
     kwargs['ti'].xcom_push(key="unread_emails", value=unread_emails)
 
