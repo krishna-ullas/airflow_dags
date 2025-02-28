@@ -12,6 +12,7 @@ from ollama import Client
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from bs4 import BeautifulSoup
+from email.utils import formataddr
 
 default_args = {
     "owner": "airflow",
@@ -81,9 +82,10 @@ def send_response(**kwargs):
     # Clean AI response
     ai_response_html = re.sub(r"^```(?:html)?\n?|```$", "", ai_response_html.strip(), flags=re.MULTILINE)
     display_name = "webshop:0.5 via lowtouch-ai"
+    formatted_sender = formataddr((display_name, EMAIL_ACCOUNT))  
     # Send the response email to the user
     msg = MIMEMultipart()
-    msg["From"] = f'"{display_name}" <me>'
+    msg["From"] = formatted_sender
     msg["To"] = sender_email
     msg["Subject"] = subject
     msg.attach(MIMEText(ai_response_html, "html"))
