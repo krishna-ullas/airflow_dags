@@ -21,8 +21,11 @@ default_args = {
     "retry_delay": timedelta(minutes=5),
 }
 
-EMAIL_ACCOUNT = Variable.get("EMAIL_ID")  # Fetching the email ID from Airflow Variable
+EMAIL_ACCOUNT = Variable.get("EMAIL_ID")  # Fetching email from Airflow Variable
 GMAIL_CREDENTIALS = Variable.get("GMAIL_CREDENTIALS", deserialize_json=True)  # Gmail API credentials
+
+# Hardcoded "Send Mail As" Name
+SEND_AS_NAME = "webshop:0.5 via lowtouch.ai"
 
 def authenticate_gmail():
     """Authenticate and return the Gmail API service."""
@@ -36,23 +39,6 @@ def authenticate_gmail():
         raise ValueError(f"Wrong Gmail account! Expected {EMAIL_ACCOUNT}, but got {logged_in_email}")
 
     return service
-
-def get_send_as_name(service):
-    """Fetch the configured 'Send Mail As' display name dynamically from Gmail settings."""
-    try:
-        send_as_list = service.users().settings().sendAs().list(userId="me").execute()
-        
-        for send_as in send_as_list.get("sendAs", []):
-            if send_as["sendAsEmail"].lower() == EMAIL_ACCOUNT.lower():
-                display_name = send_as.get("displayName", EMAIL_ACCOUNT)  # Default to email if no display name is set
-                logging.info(f"Fetched Send Mail As name: {display_name}")
-                return display_name
-        
-        logging.warning("No matching 'Send Mail As' name found. Using email address instead.")
-        return EMAIL_ACCOUNT  # Fallback if no match is found
-    except Exception as e:
-        logging.error(f"Failed to fetch 'Send Mail As' name: {str(e)}")
-        return EMAIL_ACCOUNT  # Fallback in case of API failure
 
 def get_ai_response(user_query):
     """Fetch response from AI agent."""
@@ -82,9 +68,6 @@ def send_response(**kwargs):
 
     service = authenticate_gmail()
 
-    # Fetch the dynamically set "Send Mail As" display name
-    send_as_name = get_send_as_name(service)
-
     sender_email = email_data["headers"].get("From", "")
     subject = f"Re: {email_data['headers'].get('Subject', 'No Subject')}"
     user_query = email_data["content"]
@@ -93,9 +76,11 @@ def send_response(**kwargs):
     # Cleaning up AI response if needed
     ai_response_html = re.sub(r"^```(?:html)?\n?|```$", "", ai_response_html.strip(), flags=re.MULTILINE)
 
-    # Construct email
+    # Construct email with hardcoded sender name
     msg = MIMEMultipart()
-    msg["From"] = f"{send_as_name} <{EMAIL_ACCOUNT}>"
+    msg["From"] = f"{SEND_AS_NAME} <{EMAIL_ACCOUNT}>"  # Hardcoded sender name
+    msg["Sender"] = EMAIL_ACCOUNT  # Ensures Gmail respects the sender
+    msg["Reply-To"] = f"{SEND_AS_NAME} <{EMAIL_ACCOUNT}>"  # Helps maintain sender visibility
     msg["To"] = sender_email
     msg["Subject"] = subject
     msg.attach(MIMEText(ai_response_html, "html"))
@@ -104,7 +89,7 @@ def send_response(**kwargs):
 
     try:
         service.users().messages().send(userId="me", body={"raw": raw_message}).execute()
-        logging.info(f"Email successfully sent to {sender_email} from {send_as_name} <{EMAIL_ACCOUNT}>")
+        logging.info(f"Email successfully sent to {sender_email} from {SEND_AS_NAME} <{EMAIL_ACCOUNT}>")
     except Exception as e:
         logging.error(f"Failed to send email: {str(e)}")
 
