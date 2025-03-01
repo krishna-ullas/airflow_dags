@@ -21,10 +21,14 @@ default_args = {
     "retry_delay": timedelta(minutes=5),
 }
 
-EMAIL_ACCOUNT = Variable.get("EMAIL_ID")  
-GMAIL_CREDENTIALS = Variable.get("GMAIL_CREDENTIALS", deserialize_json=True)  
+EMAIL_ACCOUNT = Variable.get("EMAIL_ID")  # Fetch sender email from Airflow Variable
+GMAIL_CREDENTIALS = Variable.get("GMAIL_CREDENTIALS", deserialize_json=True)  # Gmail API credentials
+
+# ✅ Hardcoded "Send As" Display Name
+SEND_AS_NAME = "webshop:0.5 via lowtouch.ai"
 
 def authenticate_gmail():
+    """Authenticate and return the Gmail API service."""
     creds = Credentials.from_authorized_user_info(GMAIL_CREDENTIALS)
     service = build("gmail", "v1", credentials=creds)
 
@@ -32,11 +36,12 @@ def authenticate_gmail():
     logged_in_email = profile.get("emailAddress", "")
 
     if logged_in_email.lower() != EMAIL_ACCOUNT.lower():
-        raise ValueError(f" Wrong Gmail account! Expected {EMAIL_ACCOUNT}, but got {logged_in_email}")
+        raise ValueError(f"Wrong Gmail account! Expected {EMAIL_ACCOUNT}, but got {logged_in_email}")
 
     return service
 
 def get_ai_response(user_query):
+    """Fetch response from AI agent."""
     client = Client(
         host='http://agentomatic:8000',
         headers={'x-ltai-client': 'webshop-email-respond'}
@@ -48,17 +53,18 @@ def get_ai_response(user_query):
         stream=False
     )
     agent_response = response['message']['content']
-    logging.info(f" Agent Response: {agent_response}")
+    logging.info(f"Agent Response: {agent_response}")
     return agent_response
 
 def send_response(**kwargs):
-    email_data = kwargs['dag_run'].conf.get("email_data", {})  
+    """Retrieve unread email data and send an AI-generated response."""
+    email_data = kwargs['dag_run'].conf.get("email_data", {})
 
-    logging.info(f"Received email data: {email_data}")  
+    logging.info(f"Received email data: {email_data}")
 
     if not email_data:
-        logging.warning(" No email data received! This DAG was likely triggered manually.")
-        return  
+        logging.warning("No email data received! This DAG was likely triggered manually.")
+        return
 
     service = authenticate_gmail()
 
@@ -68,7 +74,10 @@ def send_response(**kwargs):
     ai_response_html = get_ai_response(user_query)
     ai_response_html = re.sub(r"^```(?:html)?\n?|```$", "", ai_response_html.strip(), flags=re.MULTILINE)
 
+    # ✅ Construct email with enforced "Send As" name
     msg = MIMEMultipart()
+    msg["From"] = f"{SEND_AS_NAME} <{EMAIL_ACCOUNT}>"  # Force "Send As" name
+    msg["Reply-To"] = f"{SEND_AS_NAME} <{EMAIL_ACCOUNT}>"  # Ensures replies match sender name
     msg["To"] = sender_email
     msg["Subject"] = subject
     msg.attach(MIMEText(ai_response_html, "html"))
@@ -76,10 +85,9 @@ def send_response(**kwargs):
     raw_message = base64.urlsafe_b64encode(msg.as_string().encode("utf-8")).decode("utf-8")
 
     try:
-        # ✅ Fix: Use sendAs.send() to ensure correct sender name is applied
-        response = service.users().settings().sendAs().send(
+        # ✅ Send email via Gmail API (messages.send)
+        response = service.users().messages().send(
             userId="me",
-            sendAsEmail=EMAIL_ACCOUNT,  # Forces Gmail API to use the correct sender
             body={"raw": raw_message}
         ).execute()
 
@@ -87,6 +95,11 @@ def send_response(**kwargs):
     except Exception as e:
         logging.error(f"Failed to send email: {str(e)}")
 
+# ✅ Define DAG with updated email logic
 with DAG("webshop-email-respond", default_args=default_args, schedule_interval=None, catchup=False) as dag:
-    send_response_task = PythonOperator(task_id="send-response", python_callable=send_response, provide_context=True)
+    send_response_task = PythonOperator(
+        task_id="send-response",
+        python_callable=send_response,
+        provide_context=True
+    )
     send_response_task
