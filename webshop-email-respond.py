@@ -21,11 +21,8 @@ default_args = {
     "retry_delay": timedelta(minutes=5),
 }
 
-EMAIL_ACCOUNT = Variable.get("EMAIL_ID")  # Fetching email from Airflow Variable
+EMAIL_ACCOUNT = Variable.get("EMAIL_ID")  # Fetch email from Airflow Variable
 GMAIL_CREDENTIALS = Variable.get("GMAIL_CREDENTIALS", deserialize_json=True)  # Gmail API credentials
-
-# Hardcoded "Send Mail As" Name
-SEND_AS_NAME = "webshop:0.5 via lowtouch.ai"
 
 def authenticate_gmail():
     """Authenticate and return the Gmail API service."""
@@ -76,11 +73,8 @@ def send_response(**kwargs):
     # Cleaning up AI response if needed
     ai_response_html = re.sub(r"^```(?:html)?\n?|```$", "", ai_response_html.strip(), flags=re.MULTILINE)
 
-    # Construct email with hardcoded sender name
+    # Construct email message (No need to set "From", API handles it)
     msg = MIMEMultipart()
-    msg["From"] = f"{SEND_AS_NAME} <{EMAIL_ACCOUNT}>"  # Hardcoded sender name
-    msg["Sender"] = EMAIL_ACCOUNT  # Ensures Gmail respects the sender
-    msg["Reply-To"] = f"{SEND_AS_NAME} <{EMAIL_ACCOUNT}>"  # Helps maintain sender visibility
     msg["To"] = sender_email
     msg["Subject"] = subject
     msg.attach(MIMEText(ai_response_html, "html"))
@@ -88,8 +82,14 @@ def send_response(**kwargs):
     raw_message = base64.urlsafe_b64encode(msg.as_string().encode("utf-8")).decode("utf-8")
 
     try:
-        service.users().messages().send(userId="me", body={"raw": raw_message}).execute()
-        logging.info(f"Email successfully sent to {sender_email} from {SEND_AS_NAME} <{EMAIL_ACCOUNT}>")
+        # Use sendAs.send to ensure correct sender name is used
+        service.users().settings().sendAs().send(
+            userId="me",
+            sendAsEmail=EMAIL_ACCOUNT,  # Force API to use this sender
+            body={"raw": raw_message}
+        ).execute()
+
+        logging.info(f"Email successfully sent to {sender_email} from {EMAIL_ACCOUNT}")
     except Exception as e:
         logging.error(f"Failed to send email: {str(e)}")
 
